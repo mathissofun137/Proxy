@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Relay</title>
+<link id="fav" rel="icon" href="data:,">
+<style>
+:root{--bg:#0e1a1f;--fg:#d8e6e2;--accent:#4fd1b0;--radius:10px;--bar:40px;--font:system-ui,sans-serif}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:14px/1.4 var(--font);display:flex;flex-direction:column}
+body.bottom{flex-direction:column-reverse}
+#bar{display:flex;gap:6px;padding:6px;height:calc(var(--bar) + 12px);background:color-mix(in srgb,var(--bg),var(--fg) 8%);align-items:center}
+button,input,select,textarea{font:inherit;color:inherit;background:color-mix(in srgb,var(--bg),var(--fg) 12%);border:1px solid color-mix(in srgb,var(--bg),var(--fg) 22%);border-radius:var(--radius);padding:0 12px;height:var(--bar)}
+textarea{height:auto;padding:8px;width:100%;font-family:monospace}
+button{cursor:pointer}button:hover{border-color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+#url{flex:1;min-width:0}
+#stage{flex:1;position:relative;background:var(--bg) center/cover}
+#frameWrap,#frameWrap iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+#home{position:absolute;inset:0;display:grid;place-content:center;gap:14px;text-align:center}
+#home h1{font-size:clamp(36px,8vw,84px);margin:0;letter-spacing:-.03em}
+#home input{width:min(560px,86vw);height:48px}
+#status{opacity:.7}
+#panel{position:fixed;top:0;right:0;bottom:0;width:min(420px,100vw);background:var(--bg);border-left:1px solid var(--accent);overflow:auto;padding:16px;transform:translateX(100%);transition:transform .2s;z-index:9}
+#panel.open{transform:none}
+#panel h2{margin:20px 0 6px;font-size:15px;color:var(--accent)}
+#panel label{display:grid;grid-template-columns:1fr 1.4fr;gap:8px;align-items:center;margin:6px 0}
+#panel input[type=color]{padding:2px;width:100%}
+#panel input[type=checkbox]{height:20px;width:20px}
+.row{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}
+[hidden]{display:none!important}
+#games{position:absolute;inset:0;overflow:auto;background:var(--bg)}
+.gwrap{max-width:960px;margin:0 auto;padding:24px 16px}
+.gwrap h1{margin:0 0 14px;font-size:clamp(26px,5vw,44px);letter-spacing:-.02em}
+.grow{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.grow input[type=text],.grow input:not([type]){flex:1;min-width:140px}
+#ggrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.card{border:1px solid color-mix(in srgb,var(--bg),var(--fg) 22%);border-radius:var(--radius);padding:14px;background:color-mix(in srgb,var(--bg),var(--fg) 6%);display:grid;gap:8px}
+.card b{font-size:16px;overflow-wrap:anywhere}.card small{opacity:.65}.card div{display:flex;gap:6px}
+#gplay{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--bg)}
+#gplay iframe{flex:1;border:0;width:100%;background:#fff}
+@media (prefers-reduced-motion:reduce){#panel{transition:none}}
+</style>
+</head>
+<body>
+<div id="bar">
+  <button id="back" title="Back">&lt;</button><button id="fwd" title="Forward">&gt;</button><button id="rel" title="Reload">Reload</button>
+  <input id="url" placeholder="Search or enter address" autocomplete="off" spellcheck="false">
+  <button id="gamesBtn">Games</button><button id="gear">Settings</button>
+</div>
+<div id="stage">
+  <div id="frameWrap"></div>
+  <div id="home"><h1 id="brand">Relay</h1><input id="q" placeholder="Search or enter address" autocomplete="off"><button id="homeGames">Games</button><div id="status">Starting…</div></div>
+  <section id="games" hidden>
+    <div class="gwrap">
+      <h1 id="gtitle">Games</h1>
+      <div class="grow"><input id="gq" placeholder="Search games" autocomplete="off"><button id="gaddbtn">Add game</button></div>
+      <div id="gform" class="grow" hidden>
+        <input id="gname" placeholder="Name"><input id="gurl" placeholder="Game URL">
+        <label><input type="checkbox" id="gprox" checked> Open through proxy</label><button id="gsave">Save</button>
+      </div>
+      <div id="ggrid"></div>
+    </div>
+    <div id="gplay" hidden><div class="grow" style="margin:6px"><button id="gback">Back to games</button></div><iframe id="gframe" title="Game"></iframe></div>
+  </section>
+</div>
+<aside id="panel" aria-label="Settings"><button id="close">Close</button><div id="form"></div>
+  <div class="row"><button id="apply">Save and reload</button><button id="exp">Export</button><button id="imp">Import</button><button id="reset">Reset</button><button id="ab">Open in about:blank</button></div>
+</aside>
+
+<script>
+/* ===== CONFIG: edit these after hosting. Verify versions at jsdelivr.com/package/npm/<name> ===== */
+const CDN = {
+  scramjet: "https://cdn.jsdelivr.net/npm/@mercuryworkshop/scramjet@1.1.0/dist/",
+  baremux:  "https://cdn.jsdelivr.net/npm/@mercuryworkshop/bare-mux@2.1.9/dist/",
+  libcurl:  "https://cdn.jsdelivr.net/npm/@mercuryworkshop/libcurl-transport@1.5.2/dist/index.mjs",
+  epoxy:    "https://cdn.jsdelivr.net/npm/@mercuryworkshop/epoxy-transport@2.1.28/dist/index.mjs"
+};
+/* ===== Settings schema: add a row here and it appears in the panel and persists ===== */
+const D = {theme:"tide",accent:"#4fd1b0",bg:"#0e1a1f",fg:"#d8e6e2",font:"system-ui,sans-serif",radius:10,density:40,bar:"top",
+  wallpaper:"",brand:"Relay",css:"",engine:"https://duckduckgo.com/?q=%s",home:"",title:"",icon:"",
+  panic:"`",panicUrl:"https://www.wikipedia.org",transport:"libcurl",wisp:"wss://wisp.mercurywork.shop/",
+  siteFlags:"{}",f_serviceworkers:false,f_syncxhr:false,f_strictRewrites:true,f_rewriterLogs:false,f_captureErrors:true,f_cleanErrors:false,f_scramitize:false,f_sourcemaps:true,f_destructureRewrites:false,f_interceptDownloads:false,f_allowInvalidJs:true,f_allowFailedIntercepts:true};
+const THEMES = {tide:["#0e1a1f","#d8e6e2","#4fd1b0"],slate:["#eef1f5","#1b2330","#3b6cf6"],ember:["#1c1410","#f0e2d4","#ff8a3d"]};
+const S = [
+ ["Appearance"],
+ ["theme","Theme preset","select",["tide","slate","ember","custom"]],["accent","Accent","color"],["bg","Background","color"],["fg","Text","color"],
+ ["font","Font stack","text"],["radius","Corner radius","range",0,24],["density","Toolbar height","range",28,60],["bar","Toolbar position","select",["top","bottom"]],
+ ["wallpaper","Wallpaper URL","text"],["brand","Home title","text"],["css","Custom CSS (UI only)","area"],
+ ["Browsing"],
+ ["engine","Search URL (%s = query)","text"],["home","Start page URL (blank = home)","text"],
+ ["Tab and safety"],
+ ["title","Tab title","text"],["icon","Tab icon URL","text"],["panic","Panic key","text"],["panicUrl","Panic redirect","text"],
+ ["Network"],
+ ["transport","Transport","select",["libcurl","epoxy"]],["wisp","Wisp server (wss://)","text"],
+ ["Scramjet flags"],
+ ["siteFlags","Per-site flags (JSON: {\"regex\":{\"flag\":true}})","area"],
+ ...Object.keys(D).filter(k=>k.startsWith("f_")).map(k=>[k,k.slice(2),"check"])
+];
+const KEY="relay.settings.v1";
+let cfg = {...D, ...JSON.parse(localStorage.getItem(KEY)||"{}")};
+const $ = s => document.querySelector(s);
+const save = () => localStorage.setItem(KEY, JSON.stringify(cfg));
+
+function applyUI(){
+  if(cfg.theme!=="custom" && THEMES[cfg.theme]) [cfg.bg,cfg.fg,cfg.accent]=THEMES[cfg.theme];
+  const r=document.documentElement.style;
+  r.setProperty("--bg",cfg.bg);r.setProperty("--fg",cfg.fg);r.setProperty("--accent",cfg.accent);
+  r.setProperty("--font",cfg.font);r.setProperty("--radius",cfg.radius+"px");r.setProperty("--bar",cfg.density+"px");
+  document.body.classList.toggle("bottom",cfg.bar==="bottom");
+  $("#stage").style.backgroundImage=cfg.wallpaper?`url("${cfg.wallpaper.replace(/"/g,"%22")}")`:"none";
+  $("#brand").textContent=cfg.brand;
+  document.title=cfg.title||cfg.brand;
+  $("#fav").href=cfg.icon||"data:,";
+  let st=$("#userCss");if(!st){st=document.createElement("style");st.id="userCss";document.head.append(st)}
+  st.textContent=cfg.css;
+}
+function buildForm(){
+  const f=$("#form");f.textContent="";
+  for(const [k,label,type,a,b] of S){
+    if(!label){const h=document.createElement("h2");h.textContent=k;f.append(h);continue}
+    const l=document.createElement("label");l.append(label);let i;
+    if(type==="select"){i=document.createElement("select");a.forEach(o=>i.add(new Option(o,o)))}
+    else if(type==="area"){i=document.createElement("textarea");i.rows=5}
+    else{i=document.createElement("input");i.type=type==="check"?"checkbox":type==="range"?"range":type==="color"?"color":"text";if(type==="range"){i.min=a;i.max=b}}
+    if(type==="check")i.checked=cfg[k];else i.value=cfg[k];
+    i.oninput=()=>{cfg[k]=type==="check"?i.checked:type==="range"?+i.value:i.value;if(k==="theme"&&cfg.theme!=="custom"){[cfg.bg,cfg.fg,cfg.accent]=THEMES[cfg.theme];buildForm()}
+      else if(["accent","bg","fg"].includes(k)){cfg.theme="custom"}save();applyUI()};
+    l.append(i);f.append(l);
+  }
+}
+
+const load = src => new Promise((ok,no)=>{const s=document.createElement("script");s.src=src;s.crossOrigin="anonymous";s.onload=ok;s.onerror=()=>no(new Error("Failed to load "+src));document.head.append(s)});
+let sj, frame;
+const status = t => $("#status").textContent = t;
+
+/* Scramjet's service worker opens its IndexedDB without creating the tables, and if it runs first the DB is
+   left empty ("object store not found"). Create the tables from the page before the worker exists. */
+async function ensureIDB(){
+  const need=["config","cookies","redirectTrackers","referrerPolicies","publicSuffixList"];
+  const open=()=>new Promise((ok,no)=>{const r=indexedDB.open("$scramjet",1);
+    r.onupgradeneeded=()=>need.forEach(n=>r.result.objectStoreNames.contains(n)||r.result.createObjectStore(n));
+    r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});
+  let db=await open();
+  if(need.every(n=>db.objectStoreNames.contains(n))){db.close();return}
+  db.close();
+  for(const reg of await navigator.serviceWorker.getRegistrations())await reg.unregister();
+  const ok=await new Promise(res=>{const r=indexedDB.deleteDatabase("$scramjet");r.onsuccess=()=>res(true);r.onerror=()=>res(false);r.onblocked=()=>res(false)});
+  if(!ok){status("Repairing storage… reloading");setTimeout(()=>location.reload(),1200);throw new Error("Stale storage; reloading to repair")}
+  (await open()).close();
+}
+let PREFIX="",lastShown="";
+function showUrl(u){
+  if(!u||u===lastShown)return;lastShown=u;
+  for(const el of [$("#url"),$("#q")])if(el!==document.activeElement)el.value=u;
+}
+function currentUrl(){
+  try{const l=frame.frame.contentWindow.location;
+    if(l.origin===location.origin&&l.pathname.startsWith(PREFIX))return decodeURIComponent((l.pathname+l.search+l.hash).slice(PREFIX.length))}catch{}
+  return"";
+}
+function watch(){
+  frame.addEventListener?.("urlchange",e=>showUrl(e.url||e.detail?.url));
+  frame.frame.addEventListener("load",()=>view==="web"&&showUrl(currentUrl()));
+  setInterval(()=>{ if(view!=="web")return; // fallback for in-page navigations (pushState, hash changes) and title
+    showUrl(currentUrl());
+    if(!cfg.title){try{const t=frame.frame.contentDocument.title;if(t)document.title=t}catch{}}
+  },400);
+}
+async function boot(){
+  if(!("serviceWorker" in navigator)) throw new Error("Service workers need HTTPS (or localhost).");
+  const base = location.pathname.replace(/[^/]*$/,"");
+  await load(CDN.scramjet+"scramjet.all.js");
+  await load(CDN.baremux+"index.js");
+  for(const f of ["scramjet.bundle.js","scramjet.controller.js"]){
+    if(typeof $scramjetLoadController==="function"||window.ScramjetController)break;
+    await load(CDN.scramjet+f).catch(()=>{});
+  }
+  const ScramjetController=window.ScramjetController||(typeof $scramjetLoadController==="function"&&$scramjetLoadController().ScramjetController);
+  if(!ScramjetController)throw new Error("Scramjet controller not found in the loaded files. Check CDN.scramjet version and file names.");
+  PREFIX=base+"sj/";
+  let siteFlags={};try{siteFlags=JSON.parse(cfg.siteFlags||"{}")}catch{console.warn("siteFlags is not valid JSON; ignored")}
+  sj=new ScramjetController({
+    prefix:PREFIX,
+    files:{wasm:base+"scramjet.wasm.wasm",all:CDN.scramjet+"scramjet.all.js",sync:CDN.scramjet+"scramjet.sync.js"},
+    flags:Object.fromEntries(Object.keys(D).filter(k=>k.startsWith("f_")).map(k=>[k.slice(2),cfg[k]])),
+    siteFlags
+  });
+  await ensureIDB();
+  await navigator.serviceWorker.register(base+"sw.js",{scope:base});
+  await navigator.serviceWorker.ready;
+  if(!navigator.serviceWorker.controller)await new Promise(r=>{navigator.serviceWorker.addEventListener("controllerchange",r,{once:true});setTimeout(r,2500)});
+  await sj.init();
+  const conn=new BareMux.BareMuxConnection(base+"bm-worker.js");
+  await conn.setTransport(CDN[cfg.transport],[{wisp:cfg.wisp,websocket:cfg.wisp}]);
+  frame=sj.createFrame();frame.frame.title="Proxied page";
+  $("#frameWrap").append(frame.frame);
+  watch();
+  status("Ready");
+  if(cfg.home) go(cfg.home);
+}
+function toUrl(v){
+  v=v.trim();if(!v)return"";
+  if(/^https?:\/\//i.test(v))return v;
+  if(/^[\w-]+(\.[\w-]+)+(:\d+)?(\/.*)?$/.test(v))return"https://"+v;
+  return cfg.engine.replace("%s",encodeURIComponent(v));
+}
+function go(v){const pg=internal(v);if(pg){page(pg);return}const u=toUrl(v);if(!u||!frame)return;show("web");lastShown=u;$("#url").value=$("#q").value=u;frame.go(u)}
+
+$("#q").onkeydown=e=>e.key==="Enter"&&go(e.target.value);
+$("#url").onkeydown=e=>e.key==="Enter"&&go(e.target.value);
+$("#back").onclick=()=>frame?.back?.();$("#fwd").onclick=()=>frame?.forward?.();$("#rel").onclick=()=>frame?.reload?.();
+$("#gear").onclick=()=>$("#panel").classList.toggle("open");$("#close").onclick=()=>$("#panel").classList.remove("open");
+$("#apply").onclick=()=>location.reload();
+$("#reset").onclick=()=>{if(confirm("Reset all settings?")){localStorage.removeItem(KEY);location.reload()}};
+$("#exp").onclick=()=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(cfg,null,2)],{type:"application/json"}));a.download="relay-settings.json";a.click()};
+$("#imp").onclick=()=>{const i=document.createElement("input");i.type="file";i.accept=".json";i.onchange=async()=>{try{cfg={...D,...JSON.parse(await i.files[0].text())};save();location.reload()}catch{alert("Not a valid settings file")}};i.click()};
+$("#ab").onclick=()=>{const w=open("about:blank");if(w)w.document.write(`<title>${cfg.title||""}</title><iframe src="${location.href}" style="position:fixed;inset:0;width:100%;height:100%;border:0"></iframe>`)};
+addEventListener("keydown",e=>{if(cfg.panic&&e.key===cfg.panic&&!/INPUT|TEXTAREA/.test(document.activeElement.tagName))location.replace(cfg.panicUrl)});
+
+
+/* ===== Internal pages: <brand>://games, ://home, ://settings (relay:// always works too) ===== */
+let view="home";
+const scheme=()=>(cfg.brand||"relay").toLowerCase().replace(/[^a-z0-9]+/g,"")||"relay";
+function internal(v){const m=v.trim().match(/^([a-z0-9-]+):\/\/([a-z-]*)/i);if(!m)return null;const k=m[1].toLowerCase();return k===scheme()||k==="relay"?(m[2].toLowerCase()||"home"):null}
+function setBar(t){lastShown=t;$("#url").value=$("#q").value=t}
+function show(v){
+  view=v;$("#home").style.display=v==="home"?"":"none";$("#games").hidden=v!=="games";
+  if(v!=="games"){$("#gplay").hidden=true;$("#gframe").removeAttribute("srcdoc");$("#gframe").removeAttribute("src")}
+}
+function page(name){
+  if(name==="games"){show("games");$("#gtitle").textContent=cfg.brand+" Games";renderGames();setBar(scheme()+"://games")}
+  else if(name==="settings"){$("#panel").classList.add("open")}
+  else{show("home");setBar(scheme()+"://home")}
+}
+const BUILTIN=[
+{name:"Snake",doc:`<body style="margin:0;display:grid;place-items:center;height:100vh;background:#222;color:#fff;font:16px sans-serif"><div><canvas id=c width=400 height=400 style="display:block"></canvas><div id=s style="text-align:center;padding:6px"></div></div><script>
+const x=c.getContext('2d'),N=20,Z=20;let sn,d,nd,f,sc;
+function p(){return{x:Math.random()*N|0,y:Math.random()*N|0}}
+function r(){sn=[{x:10,y:10}];d=nd={x:1,y:0};sc=0;f=p()}
+onkeydown=e=>{const m={ArrowUp:[0,-1],w:[0,-1],ArrowDown:[0,1],s:[0,1],ArrowLeft:[-1,0],a:[-1,0],ArrowRight:[1,0],d:[1,0]}[e.key];if(m){e.preventDefault();if(m[0]!==-d.x||m[1]!==-d.y)nd={x:m[0],y:m[1]}}};
+function tick(){d=nd;const h={x:(sn[0].x+d.x+N)%N,y:(sn[0].y+d.y+N)%N};if(sn.some(q=>q.x===h.x&&q.y===h.y))r();else{sn.unshift(h);if(h.x===f.x&&h.y===f.y){sc++;f=p()}else sn.pop()}
+x.fillStyle='#111';x.fillRect(0,0,400,400);x.fillStyle='#e55';x.fillRect(f.x*Z,f.y*Z,Z-1,Z-1);x.fillStyle='#4c8';sn.forEach(q=>x.fillRect(q.x*Z,q.y*Z,Z-1,Z-1));s.textContent='Score '+sc+' - arrow keys or WASD'}
+r();setInterval(tick,100);
+<\/script></body>`},
+{name:"2048",doc:`<body style="margin:0;display:grid;place-items:center;height:100vh;background:#222;color:#fff;font:700 24px sans-serif"><div><div id=b style="display:grid;grid-template:repeat(4,80px)/repeat(4,80px);gap:8px"></div><p style="text-align:center;font:14px sans-serif">Arrow keys or WASD</p></div><script>
+let g;const C={0:'#333',2:'#eee4da',4:'#ede0c8',8:'#f2b179',16:'#f59563',32:'#f67c5f',64:'#f65e3b',128:'#edcf72',256:'#edcf72',512:'#edc850',1024:'#edc53f',2048:'#edc22e'};
+function add(){const e=g.map((v,i)=>v?-1:i).filter(i=>i>=0);if(e.length)g[e[Math.random()*e.length|0]]=Math.random()<.9?2:4}
+function draw(){b.innerHTML=g.map(v=>'<div style="display:grid;place-items:center;border-radius:6px;background:'+(C[v]||'#3c3a32')+';color:'+(v>4?'#fff':'#776e65')+'">'+(v||'')+'</div>').join('')}
+function line(a){a=a.filter(Boolean);for(let i=0;i<a.length-1;i++)if(a[i]===a[i+1]){a[i]*=2;a.splice(i+1,1)}while(a.length<4)a.push(0);return a}
+function mv(d){const o=g.join();for(let k=0;k<4;k++){let ix=[0,1,2,3].map(j=>d<2?k*4+j:j*4+k);if(d%2)ix.reverse();const l=line(ix.map(i=>g[i]));ix.forEach((i,j)=>g[i]=l[j])}if(g.join()!==o){add();draw()}}
+onkeydown=e=>{const d={ArrowLeft:0,a:0,ArrowRight:1,d:1,ArrowUp:2,w:2,ArrowDown:3,s:3}[e.key];if(d!==undefined){e.preventDefault();mv(d)}};
+g=Array(16).fill(0);add();add();draw();
+<\/script></body>`}
+];
+const GKEY="relay.games";
+let custom=[];try{custom=JSON.parse(localStorage.getItem(GKEY)||"[]")}catch{}
+const saveG=()=>localStorage.setItem(GKEY,JSON.stringify(custom));
+function playGame(g){
+  if(g.lumin){Lumin.loadGame(g.id).catch(e=>console.warn("Lumin play:",e));return}
+  if(g.doc){const f=$("#gframe");f.setAttribute("sandbox","allow-scripts");f.srcdoc=g.doc;$("#gplay").hidden=false}
+  else if(g.proxy){go(g.url)}
+  else{const f=$("#gframe");f.setAttribute("sandbox","allow-scripts allow-same-origin allow-forms allow-pointer-lock allow-popups");f.src=g.url;$("#gplay").hidden=false}
+}
+let luminGames=[],luminReady=false,luminLoading=false;
+async function fetchLuminGames(q){
+  if(!luminReady||typeof Lumin==="undefined")return[];
+  try{
+    const res=q?await Lumin.search(q):await Lumin.getGames({page:1,limit:48});
+    return (res.games||[]).map(g=>({id:g.id,name:g.name,lumin:true,category:g.category||"Lumin",image_token:g.image_token}));
+  }catch(e){console.warn("Lumin fetch:",e);return[]}
+}
+async function renderGames(){
+  const q=$("#gq").value.toLowerCase(),grid=$("#ggrid");grid.textContent="";
+  if(luminReady)luminGames=await fetchLuminGames(q);
+  const local=[...BUILTIN,...custom.map((g,i)=>({...g,i}))].filter(g=>g.name.toLowerCase().includes(q));
+  const all=[...local,...luminGames].sort((a,b)=>!!b.fav-!!a.fav);
+  const btn=(t,fn)=>{const b=document.createElement("button");b.textContent=t;b.onclick=fn;return b};
+  for(const g of all){
+    const c=document.createElement("div");c.className="card";
+    const n=document.createElement("b");n.textContent=(g.fav?"★ ":"")+g.name;
+    const sm=document.createElement("small");sm.textContent=g.lumin?(g.category||"Lumin"):g.doc?"Built in":g.proxy?"Via proxy":"Direct embed";
+    const row=document.createElement("div");row.append(btn("Play",()=>playGame(g)));
+    if(!g.doc&&!g.lumin){row.append(btn(g.fav?"Unstar":"Star",()=>{custom[g.i].fav=!g.fav;saveG();renderGames()}),
+      btn("Remove",()=>{if(confirm("Remove "+g.name+"?")){custom.splice(g.i,1);saveG();renderGames()}}))}
+    c.append(n,sm,row);grid.append(c);
+  }
+  if(!all.length)grid.textContent=luminLoading?"Loading games…":"No games match.";
+}
+$("#gq").oninput=()=>{clearTimeout($("#gq")._t);$("#gq")._t=setTimeout(renderGames,250)};
+$("#gaddbtn").onclick=()=>$("#gform").hidden=!$("#gform").hidden;
+$("#gsave").onclick=()=>{
+  const name=$("#gname").value.trim(),url=toUrl($("#gurl").value);
+  if(!name||!/^https?:\/\//.test(url))return alert("Enter a name and a valid URL");
+  custom.push({name,url,proxy:$("#gprox").checked});saveG();$("#gname").value=$("#gurl").value="";$("#gform").hidden=true;renderGames();
+};
+$("#gback").onclick=()=>{$("#gplay").hidden=true;$("#gframe").removeAttribute("srcdoc");$("#gframe").removeAttribute("src")};
+$("#gamesBtn").onclick=$("#homeGames").onclick=()=>page("games");
+
+/* LuminSDK headless — games render as Relay-style cards */
+function initLumin(){
+  if(luminReady||luminLoading||typeof Lumin==="undefined")return;
+  luminLoading=true;
+  Lumin.init({headless:true,onError:e=>console.warn("LuminSDK:",e?.message||e)})
+    .then(()=>{luminReady=true;luminLoading=false;if(view==="games")renderGames()})
+    .catch(e=>{luminLoading=false;console.warn("Lumin init failed:",e)});
+}
+const luminScript=document.createElement("script");
+luminScript.src="https://cdn.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js";
+luminScript.onload=initLumin;
+luminScript.onerror=()=>console.warn("Failed to load LuminSDK");
+document.head.append(luminScript);
+
+applyUI();buildForm();
+boot().catch(e=>{console.error(e);status("Setup failed: "+e.message)});
+</script>
+</body>
+</html>
